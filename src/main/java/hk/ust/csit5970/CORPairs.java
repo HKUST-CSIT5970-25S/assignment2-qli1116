@@ -39,112 +39,104 @@ public class CORPairs extends Configured implements Tool {
 	private static final Logger LOG = Logger.getLogger(CORPairs.class);
 
 	/*
-	 * TODO: Write your first-pass Mapper here.
+	 * First-pass Mapper
 	 */
 	private static class CORMapper1 extends
 			Mapper<LongWritable, Text, Text, IntWritable> {
-				private static final IntWritable ONE = new IntWritable(1);
+		private static final IntWritable ONE = new IntWritable(1);
+		private static final Text word = new Text();
+		
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
-			HashMap<String, Integer> word_set = new HashMap<String, Integer>();
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
 			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
 			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-			while (doc_tokenizer.hasMoreTokens()) {
-				String token = doc_tokenizer.nextToken().toLowerCase();
-				word_set.put(token, 1);
-			}
 			
-			// Emit each unique word with count 1
-			for (String word : word_set.keySet()) {
-				context.write(new Text(word), ONE);
+			// Count each word occurrence (not just unique words)
+			while (doc_tokenizer.hasMoreTokens()) {
+				String token = doc_tokenizer.nextToken();
+				word.set(token);
+				context.write(word, ONE);
 			}
 		}
 	}
 
 	/*
-	 * TODO: Write your first-pass reducer here.
+	 * First-pass reducer
 	 */
 	private static class CORReducer1 extends
 			Reducer<Text, IntWritable, Text, IntWritable> {
+		private static final IntWritable SUM = new IntWritable();
+		
 		@Override
 		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
 			int sum = 0;
 			for (IntWritable val : values) {
 				sum += val.get();
 			}
-			context.write(key, new IntWritable(sum));
+			SUM.set(sum);
+			context.write(key, SUM);
 		}
 	}
 
 
 	/*
-	 * TODO: Write your second-pass Mapper here.
+	 * Second-pass Mapper
 	 */
 	public static class CORPairsMapper2 extends Mapper<LongWritable, Text, PairOfStrings, IntWritable> {
 		private static final IntWritable ONE = new IntWritable(1);
+		private static final PairOfStrings pair = new PairOfStrings();
     
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
-			StringTokenizer doc_tokenizer = new StringTokenizer(value.toString().replaceAll("[^a-z A-Z]", " "));
+			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
+			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
 			
 			// Collect unique words in the line
-			Set<String> uniqueWords = new HashSet<String>();
+			Set<String> uniqueWords = new TreeSet<String>();
 			while (doc_tokenizer.hasMoreTokens()) {
-				String token = doc_tokenizer.nextToken().toLowerCase();
+				String token = doc_tokenizer.nextToken();
 				uniqueWords.add(token);
 			}
 			
 			// Generate all word pairs (ensuring alphabetical order)
-			String[] words = uniqueWords.toArray(new String[0]);
-			for (int i = 0; i < words.length; i++) {
-				for (int j = i + 1; j < words.length; j++) {
-					String wordA = words[i];
-					String wordB = words[j];
-					
-					// Ensure alphabetical ordering
-					if (wordA.compareTo(wordB) > 0) {
-						String temp = wordA;
-						wordA = wordB;
-						wordB = temp;
-					}
-					
-					context.write(new PairOfStrings(wordA, wordB), ONE);
+			List<String> wordList = new ArrayList<String>(uniqueWords);
+			for (int i = 0; i < wordList.size(); i++) {
+				String first_word = wordList.get(i);
+				for (int j = i + 1; j < wordList.size(); j++) {
+					String second_word = wordList.get(j);
+					pair.set(first_word, second_word);
+					context.write(pair, ONE);
 				}
 			}
 		}
 	}
 
 	/*
-	 * TODO: Write your second-pass Combiner here.
+	 * Second-pass Combiner
 	 */
 	private static class CORPairsCombiner2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, IntWritable> {
+		private static final IntWritable SUM = new IntWritable();
+		
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
 			int sum = 0;
 			for (IntWritable val : values) {
 				sum += val.get();
 			}
-			context.write(key, new IntWritable(sum));
+			SUM.set(sum);
+			context.write(key, SUM);
 		}
 	}
 
 	/*
-	 * TODO: Write your second-pass Reducer here.
+	 * Second-pass Reducer
 	 */
 	public static class CORPairsReducer2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, DoubleWritable> {
 		private final static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
+		private static final DoubleWritable correlation = new DoubleWritable();
 
 		/*
 		 * Preload the middle result file.
@@ -182,13 +174,10 @@ public class CORPairs extends Configured implements Tool {
 		}
 
 		/*
-		 * TODO: write your second-pass Reducer here.
+		 * Second-pass Reducer
 		 */
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
 			// Calculate Freq(A,B) - the number of lines containing both words
 			int pairFreq = 0;
 			for (IntWritable val : values) {
@@ -199,14 +188,22 @@ public class CORPairs extends Configured implements Tool {
 			String wordA = key.getLeftElement();
 			String wordB = key.getRightElement();
 			
-			if (word_total_map.containsKey(wordA) && word_total_map.containsKey(wordB)) {
-				int freqA = word_total_map.get(wordA);
-				int freqB = word_total_map.get(wordB);
-				
+			int freqA = 0;
+			int freqB = 0;
+			
+			if (word_total_map.containsKey(wordA)) {
+				freqA = word_total_map.get(wordA);
+			}
+			
+			if (word_total_map.containsKey(wordB)) {
+				freqB = word_total_map.get(wordB);
+			}
+			
+			if (freqA > 0 && freqB > 0) {
 				// Calculate correlation coefficient: COR(A,B) = Freq(A,B) / (Freq(A) * Freq(B))
-				double correlation = (double) pairFreq / (freqA * freqB);
-				
-				context.write(key, new DoubleWritable(correlation));
+				double cor = (double) pairFreq / (freqA * freqB);
+				correlation.set(cor);
+				context.write(key, correlation);
 			}
 		}
 	}
