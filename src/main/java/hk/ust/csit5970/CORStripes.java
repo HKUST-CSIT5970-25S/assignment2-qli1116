@@ -33,6 +33,8 @@ public class CORStripes extends Configured implements Tool {
 	 */
 	private static class CORMapper1 extends
 			Mapper<LongWritable, Text, Text, IntWritable> {
+		private static final IntWritable ONE = new IntWritable(1);
+		private Text word = new Text();
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
@@ -81,6 +83,7 @@ public class CORStripes extends Configured implements Tool {
 	 * TODO: Write your second-pass Mapper here.
 	 */
 	public static class CORStripesMapper2 extends Mapper<LongWritable, Text, Text, MapWritable> {
+		private Text word = new Text();
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			Set<String> sorted_word_set = new TreeSet<String>();
@@ -216,11 +219,13 @@ public class CORStripes extends Configured implements Tool {
 			
 			// Calculate correlation for each co-occurring word
 			String w = key.toString();
-			int N_w = word_total_map.getOrDefault(w, 0);
+			// Replace getOrDefault with manual check
+			int N_w = word_total_map.containsKey(w) ? word_total_map.get(w) : 0;
 			
 			for (Writable neighbor_writable : combined_stripe.keySet()) {
 				String u = ((Text) neighbor_writable).toString();
-				int N_u = word_total_map.getOrDefault(u, 0);
+				// Replace getOrDefault with manual check
+				int N_u = word_total_map.containsKey(u) ? word_total_map.get(u) : 0;
 				int N_wu = ((IntWritable) combined_stripe.get(neighbor_writable)).get();
 				
 				// Calculate correlation: N(w,u) / (N(w) * N(u))
