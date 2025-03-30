@@ -53,6 +53,15 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			while (doc_tokenizer.hasMoreTokens()) {
+				String token = doc_tokenizer.nextToken().toLowerCase();
+				word_set.put(token, 1);
+			}
+			
+			// Emit each unique word with count 1
+			for (String word : word_set.keySet()) {
+				context.write(new Text(word), ONE);
+			}
 		}
 	}
 
@@ -66,6 +75,11 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -78,9 +92,31 @@ public class CORPairs extends Configured implements Tool {
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
 			StringTokenizer doc_tokenizer = new StringTokenizer(value.toString().replaceAll("[^a-z A-Z]", " "));
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			
+			// Collect unique words in the line
+			Set<String> uniqueWords = new HashSet<String>();
+			while (doc_tokenizer.hasMoreTokens()) {
+				String token = doc_tokenizer.nextToken().toLowerCase();
+				uniqueWords.add(token);
+			}
+			
+			// Generate all word pairs (ensuring alphabetical order)
+			String[] words = uniqueWords.toArray(new String[0]);
+			for (int i = 0; i < words.length; i++) {
+				for (int j = i + 1; j < words.length; j++) {
+					String wordA = words[i];
+					String wordB = words[j];
+					
+					// Ensure alphabetical ordering
+					if (wordA.compareTo(wordB) > 0) {
+						String temp = wordA;
+						wordA = wordB;
+						wordB = temp;
+					}
+					
+					context.write(new PairOfStrings(wordA, wordB), ONE);
+				}
+			}
 		}
 	}
 
@@ -93,6 +129,11 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -145,6 +186,25 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			// Calculate Freq(A,B) - the number of lines containing both words
+			int pairFreq = 0;
+			for (IntWritable val : values) {
+				pairFreq += val.get();
+			}
+			
+			// Get the individual word frequencies
+			String wordA = key.getLeftElement();
+			String wordB = key.getRightElement();
+			
+			if (word_total_map.containsKey(wordA) && word_total_map.containsKey(wordB)) {
+				int freqA = word_total_map.get(wordA);
+				int freqB = word_total_map.get(wordB);
+				
+				// Calculate correlation coefficient: COR(A,B) = Freq(A,B) / (Freq(A) * Freq(B))
+				double correlation = (double) pairFreq / (freqA * freqB);
+				
+				context.write(key, new DoubleWritable(correlation));
+			}
 		}
 	}
 

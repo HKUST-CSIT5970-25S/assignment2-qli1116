@@ -50,9 +50,20 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 			String line = ((Text) value).toString();
 			String[] words = line.trim().split("\\s+");
 			
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			if (words.length < 2) return; // Skip lines with fewer than 2 words
+        
+			// Emit bigram counts
+			for (int i = 0; i < words.length - 1; i++) {
+				if (words[i].length() == 0 || words[i+1].length() == 0) continue;
+				
+				// Emit the bigram with count 1
+				BIGRAM.set(words[i], words[i+1]);
+				context.write(BIGRAM, ONE);
+				
+				// Emit the marginal count for the left word
+				BIGRAM.set(words[i], "*");
+				context.write(BIGRAM, ONE);
+			}
 		}
 	}
 
@@ -64,13 +75,39 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 
 		// Reuse objects.
 		private final static FloatWritable VALUE = new FloatWritable();
+		private int marginalCount = 0;
+		private String currentWord = null;
 
 		@Override
 		public void reduce(PairOfStrings key, Iterable<IntWritable> values,
 				Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			 // Get the left and right elements of the pair
+			 String left = key.getLeftElement();
+			 String right = key.getRightElement();
+			 
+			 // Sum up the counts for this key
+			 int sum = 0;
+			 for (IntWritable value : values) {
+				 sum += value.get();
+			 }
+			 
+			 // If we encounter a new left word, reset the marginal count
+			 if (currentWord == null || !currentWord.equals(left)) {
+				 currentWord = left;
+				 marginalCount = 0;
+			 }
+			 
+			 // If this is a marginal count entry (right element is "*")
+			 if (right.equals("*")) {
+				 marginalCount = sum;
+			 } else {
+				 // This is a regular bigram, calculate and emit the relative frequency
+				 if (marginalCount > 0) {
+					 float relativeFrequency = (float) sum / marginalCount;
+					 VALUE.set(relativeFrequency);
+					 context.write(key, VALUE);
+				 }
+			 }
 		}
 	}
 	
@@ -81,9 +118,15 @@ public class BigramFrequencyPairs extends Configured implements Tool {
 		@Override
 		public void reduce(PairOfStrings key, Iterable<IntWritable> values,
 				Context context) throws IOException, InterruptedException {
-			/*
-			 * TODO: Your implementation goes here.
-			 */
+			 // Sum up all the counts for this key
+			 int sum = 0;
+			 for (IntWritable value : values) {
+				 sum += value.get();
+			 }
+			 
+			 // Emit the key with the summed count
+			 SUM.set(sum);
+			 context.write(key, SUM);
 		}
 	}
 

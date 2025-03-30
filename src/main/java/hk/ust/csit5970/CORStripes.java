@@ -43,6 +43,17 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			// Count each unique word in the document
+			while (doc_tokenizer.hasMoreTokens()) {
+				String token = doc_tokenizer.nextToken();
+				word_set.put(token, 1);
+			}
+			
+			// Emit each unique word with count 1
+			for (String token : word_set.keySet()) {
+				word.set(token);
+				context.write(word, ONE);
+			}
 		}
 	}
 
@@ -56,6 +67,13 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;
+			// Sum up all occurrences of the word
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			// Emit the word and its total count
+			context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -75,6 +93,21 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			// For each word, create a stripe containing all co-occurring words
+			for (String w : sorted_word_set) {
+				MapWritable stripe = new MapWritable();
+				
+				// Add all other words to the stripe with count 1
+				for (String u : sorted_word_set) {
+					if (!w.equals(u)) {
+						stripe.put(new Text(u), new IntWritable(1));
+					}
+				}
+				
+				// Emit the word and its stripe
+				word.set(w);
+				context.write(word, stripe);
+			}
 		}
 	}
 
@@ -89,6 +122,27 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			MapWritable combined_stripe = new MapWritable();
+        
+			// Combine all stripes for the same word
+			for (MapWritable stripe : values) {
+				for (Writable w : stripe.keySet()) {
+					Text neighbor = (Text) w;
+					IntWritable count = (IntWritable) stripe.get(neighbor);
+					
+					// Get current count for this neighbor
+					IntWritable current = (IntWritable) combined_stripe.get(neighbor);
+					if (current == null) {
+						combined_stripe.put(neighbor, new IntWritable(count.get()));
+					} else {
+						// Add the counts
+						combined_stripe.put(neighbor, new IntWritable(current.get() + count.get()));
+					}
+				}
+			}
+        
+			// Emit the word and its combined stripe
+			context.write(key, combined_stripe);
 		}
 	}
 
@@ -142,8 +196,46 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			// Combine all stripes for this word
+			MapWritable combined_stripe = new MapWritable();
+			for (MapWritable stripe : values) {
+				for (Writable w : stripe.keySet()) {
+					Text neighbor = (Text) w;
+					IntWritable count = (IntWritable) stripe.get(neighbor);
+					
+					// Get current count for this neighbor
+					IntWritable current = (IntWritable) combined_stripe.get(neighbor);
+					if (current == null) {
+						combined_stripe.put(neighbor, new IntWritable(count.get()));
+					} else {
+						// Add the counts
+						combined_stripe.put(neighbor, new IntWritable(current.get() + count.get()));
+					}
+				}
+			}
+			
+			// Calculate correlation for each co-occurring word
+			String w = key.toString();
+			int N_w = word_total_map.getOrDefault(w, 0);
+			
+			for (Writable neighbor_writable : combined_stripe.keySet()) {
+				String u = ((Text) neighbor_writable).toString();
+				int N_u = word_total_map.getOrDefault(u, 0);
+				int N_wu = ((IntWritable) combined_stripe.get(neighbor_writable)).get();
+				
+				// Calculate correlation: N(w,u) / (N(w) * N(u))
+				double correlation = 0.0;
+				if (N_w > 0 && N_u > 0) {
+					correlation = (double) N_wu / (N_w * N_u);
+				}
+				
+				// Emit the word pair and its correlation
+				PairOfStrings pair = new PairOfStrings(w, u);
+				context.write(pair, new DoubleWritable(correlation));
+			}
 		}
 	}
+
 
 	/**
 	 * Creates an instance of this tool.
