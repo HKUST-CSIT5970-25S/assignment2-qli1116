@@ -49,7 +49,7 @@ $ sudo bash start_hadoop.sh
 
 For text editing on EC2 instance, please refer to lab-0 or watch the following recording: https://hkust.zoom.us/rec/share/FRAflAjNKRR1TA2AaUKoibycxNtRkK4TTN8STd-7ngkQLhsVxogq_t31oVPFRNuJ.Pm7E6y9r1spxJ4Vg
 
-Notice that the hadoop filesystem and the maven are installed inside the container, so you need to enter the container by `docker exec -w /host -it quickstart bash` and then run the compilation and hadoop commands.
+Notice that the hadoop filesystem and the maven are installed inside the container, so you need to enter the container by `docker exec -w /host -it cloudera_quickstart bash` and then run the compilation and hadoop commands.
 
 This assignment repo is generated using [Apache Maven][Maven]. You'll find a `pom.xml` file in the root directory (which tells [Maven][Maven] how to build the code) and a source folder `src/`. Inside `src/`, there are two sub-directories, one for the main source code (`main/`) and another for the test code (`test/`). The test code is nothing but a placeholder and will not be used in this assignment. The real code locates in the source folder, where you'll find the following Java class files: 
 
