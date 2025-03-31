@@ -38,19 +38,24 @@ public class CORStripes extends Configured implements Tool {
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
-			HashMap<String, Integer> word_set = new HashMap<String, Integer>();
-			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
 			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
-			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
-			/*
-			 * TODO: Your implementation goes here.
-			 */
-			// Count each word occurrence (not just unique words)
-			while (doc_tokenizer.hasMoreTokens()) {
-				String token = doc_tokenizer.nextToken();
-				word.set(token);
-				context.write(word, ONE);
-			}
+            StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
+            // Count occurrences of each word in this line.
+            HashMap<String, Integer> wordCountMap = new HashMap<String, Integer>();
+            while (doc_tokenizer.hasMoreTokens()) {
+                String token = doc_tokenizer.nextToken();
+                if (!token.trim().isEmpty()) {
+                    if (wordCountMap.containsKey(token)) {
+                        wordCountMap.put(token, wordCountMap.get(token) + 1);
+                    } else {
+                        wordCountMap.put(token, 1);
+                    }
+                }
+            }
+            // Emit each word with its count.
+            for (Map.Entry<String, Integer> entry : wordCountMap.entrySet()) {
+                context.write(new Text(entry.getKey()), new IntWritable(entry.getValue()));
+            }
 		}
 	}
 
@@ -71,69 +76,43 @@ public class CORStripes extends Configured implements Tool {
 			context.write(key, SUM);
 		}
 	}
-	private static class HashMapStringIntWritable {
-		private HashMap<String, Integer> map = new HashMap<String, Integer>();
-		
-		public void increment(String key) {
-			increment(key, 1);
-		}
-		
-		public void increment(String key, int value) {
-			if (map.containsKey(key)) {
-				map.put(key, map.get(key) + value);
-			} else {
-				map.put(key, value);
-			}
-		}
-		
-		public Set<Map.Entry<String, Integer>> entrySet() {
-			return map.entrySet();
-		}
-		
-		public void clear() {
-			map.clear();
-		}
-	}
+
 	/*
 	 * TODO: Write your second-pass Mapper here.
 	 */
 	public static class CORStripesMapper2 extends Mapper<LongWritable, Text, Text, MapWritable> {
-		private static final HashMapStringIntWritable STRIPE = new HashMapStringIntWritable();
-		private static final Text KEY = new Text();
-		private static final MapWritable MAP = new MapWritable();
-		private static final Text MAP_key = new Text();
-		private static final IntWritable MAP_entry = new IntWritable();
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-			Set<String> sorted_word_set = new TreeSet<String>();
-			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
-			String doc_clean = value.toString().replaceAll("[^a-z A-Z]", " ");
-			StringTokenizer doc_tokenizers = new StringTokenizer(doc_clean);
-			while (doc_tokenizers.hasMoreTokens()) {
-				sorted_word_set.add(doc_tokenizers.nextToken());
-			}
-			
-			List<String> wordList = new ArrayList<String>(sorted_word_set);
-			
-			// Process word pairs in alphabetical order
-			for (int i = 0; i < wordList.size(); i++) {
-				String first_word = wordList.get(i);
-				for (int j = i + 1; j < wordList.size(); j++) {
-					String second_word = wordList.get(j);
-					STRIPE.increment(second_word);
-				}
-				
-				KEY.set(first_word);
-				for (Map.Entry<String, Integer> entry : STRIPE.entrySet()) {
-					MAP_key.set(entry.getKey());
-					MAP_entry.set(entry.getValue());
-					MAP.put(MAP_key, MAP_entry);
-				}
-				
-				context.write(KEY, MAP);
-				STRIPE.clear();
-				MAP.clear();
-			}
+			// Use TreeSet to get sorted unique words.
+            Set<String> sorted_word_set = new TreeSet<String>();
+            String doc_clean = value.toString().replaceAll("[^a-z A-Z]", " ");
+            StringTokenizer doc_tokenizers = new StringTokenizer(doc_clean);
+            while (doc_tokenizers.hasMoreTokens()) {
+                String token = doc_tokenizers.nextToken();
+                if (!token.trim().isEmpty()) {
+                    sorted_word_set.add(token);
+                }
+            }
+            // For each word A, build a stripe for all words B > A.
+            for (String wordA : sorted_word_set) {
+                MapWritable stripe = new MapWritable();
+                // Get all words greater than wordA.
+                SortedSet<String> tailSet = ((TreeSet<String>) sorted_word_set).tailSet(wordA, false);
+                for (String wordB : tailSet) {
+                    Text neighbor = new Text(wordB);
+                    // Each line contributes count=1 for this pair.
+                    if (stripe.containsKey(neighbor)) {
+                        IntWritable count = (IntWritable) stripe.get(neighbor);
+                        count.set(count.get() + 1);
+                        stripe.put(neighbor, count);
+                    } else {
+                        stripe.put(neighbor, new IntWritable(1));
+                    }
+                }
+                if (!stripe.isEmpty()) {
+                    context.write(new Text(wordA), stripe);
+                }
+            }
 		}
 	}
 
@@ -141,33 +120,27 @@ public class CORStripes extends Configured implements Tool {
 	 * TODO: Write your second-pass Combiner here.
 	 */
 	public static class CORStripesCombiner2 extends Reducer<Text, MapWritable, Text, MapWritable> {
-		static IntWritable ZERO = new IntWritable(0);
-		private static final HashMapStringIntWritable Combined_STRIPE = new HashMapStringIntWritable();
-		private static final MapWritable output = new MapWritable();
-		private static final Text MAP_key = new Text();
-		private static final IntWritable MAP_entry = new IntWritable();
+
 		@Override
 		protected void reduce(Text key, Iterable<MapWritable> values, Context context) throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
-			for (MapWritable stripe : values) {
-				for (Map.Entry<Writable, Writable> entry : stripe.entrySet()) {
-					String neighbor = ((Text) entry.getKey()).toString();
-					int count = ((IntWritable) entry.getValue()).get();
-					Combined_STRIPE.increment(neighbor, count);
-				}
-			}
-			
-			for (Map.Entry<String, Integer> entry : Combined_STRIPE.entrySet()) {
-				MAP_key.set(entry.getKey());
-				MAP_entry.set(entry.getValue());
-				output.put(MAP_key, MAP_entry);
-			}
-			
-			context.write(key, output);
-			Combined_STRIPE.clear();
-			output.clear();
+			MapWritable combined = new MapWritable();
+            for (MapWritable stripe : values) {
+                for (Writable w : stripe.keySet()) {
+                    Text neighbor = (Text) w;
+                    IntWritable count = (IntWritable) stripe.get(neighbor);
+                    if (combined.containsKey(neighbor)) {
+                        IntWritable oldCount = (IntWritable) combined.get(neighbor);
+                        oldCount.set(oldCount.get() + count.get());
+                        combined.put(neighbor, oldCount);
+                    } else {
+                        combined.put(neighbor, new IntWritable(count.get()));
+                    }
+                }
+            }
+            context.write(key, combined);
 		}
 	}
 
@@ -175,10 +148,8 @@ public class CORStripes extends Configured implements Tool {
 	 * TODO: Write your second-pass Reducer here.
 	 */
 	public static class CORStripesReducer2 extends Reducer<Text, MapWritable, PairOfStrings, DoubleWritable> {
-		private static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
-		private static final HashMapStringIntWritable LAST_STRIPE = new HashMapStringIntWritable();
-		private static final PairOfStrings outputKey = new PairOfStrings();
-		private static final DoubleWritable outputValue = new DoubleWritable();
+        private static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
+
 		/*
 		 * Preload the middle result file.
 		 * In the middle result file, each line contains a word and its frequency Freq(A), seperated by "\t"
@@ -222,41 +193,36 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
-			// Combine all stripes for this word
-			for (MapWritable stripe : values) {
-				for (Map.Entry<Writable, Writable> entry : stripe.entrySet()) {
-					String neighbor = ((Text) entry.getKey()).toString();
-					int count = ((IntWritable) entry.getValue()).get();
-					LAST_STRIPE.increment(neighbor, count);
-				}
-			}
-			
-			String first_word = key.toString();
-			int cnt_A;
-			if (word_total_map.containsKey(first_word)) { 
-				cnt_A = word_total_map.get(first_word);
-			} else {
-				cnt_A = 0;
-			}
-			
-			for (Map.Entry<String, Integer> entry : LAST_STRIPE.entrySet()) {
-				String second_word = entry.getKey();
-				int cnt_AB = entry.getValue();
-				
-				int cnt_B;
-				if (word_total_map.containsKey(second_word)) {
-					cnt_B = word_total_map.get(second_word);
-				} else {
-					cnt_B = 0;
-				}
-				
-				double cor = (double) cnt_AB / (cnt_A * cnt_B);
-				outputKey.set(first_word, second_word);
-				outputValue.set(cor);
-				context.write(outputKey, outputValue);
-			}
-			
-			LAST_STRIPE.clear();
+			MapWritable combined = new MapWritable();
+            for (MapWritable stripe : values) {
+                for (Writable w : stripe.keySet()) {
+                    Text neighbor = (Text) w;
+                    IntWritable count = (IntWritable) stripe.get(neighbor);
+                    if (combined.containsKey(neighbor)) {
+                        IntWritable oldCount = (IntWritable) combined.get(neighbor);
+                        oldCount.set(oldCount.get() + count.get());
+                        combined.put(neighbor, oldCount);
+                    } else {
+                        combined.put(neighbor, new IntWritable(count.get()));
+                    }
+                }
+            }
+            // Now, key is word A. For each neighbor word B in the combined stripe, compute COR(A,B).
+            String wordA = key.toString();
+            Integer freqA = word_total_map.get(wordA);
+            if (freqA == null || freqA == 0) return;
+            for (Writable w : combined.keySet()) {
+                Text neighbor = (Text) w;
+                int freqAB = ((IntWritable) combined.get(neighbor)).get();
+                String wordB = neighbor.toString();
+                Integer freqB = word_total_map.get(wordB);
+                if (freqB != null && freqB != 0) {
+                    double cor = (double) freqAB / (freqA * freqB);
+                    // Emit pair (A, B) with A < B since our stripes only contain neighbors > A.
+                    PairOfStrings pair = new PairOfStrings(wordA, wordB);
+                    context.write(pair, new DoubleWritable(cor));
+                }
+            }
 		}
 	}
 

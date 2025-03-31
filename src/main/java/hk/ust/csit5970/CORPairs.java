@@ -43,22 +43,33 @@ public class CORPairs extends Configured implements Tool {
 	 */
 	private static class CORMapper1 extends
 			Mapper<LongWritable, Text, Text, IntWritable> {
-		private static final IntWritable ONE = new IntWritable(1);
-		private static final Text word = new Text();
+		private Text wordText = new Text();
 		
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
-			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
-			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
-			
-			// Count each word occurrence (not just unique words)
-			while (doc_tokenizer.hasMoreTokens()) {
-				String token = doc_tokenizer.nextToken();
-				word.set(token);
-				context.write(word, ONE);
-			}
+			String clean_doc = value.toString().replaceAll("[^a-zA-Z ]", " ");
+            StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
+            
+            // Use a map to combine counts for each word in this line.
+            Map<String, Integer> wordCountMap = new HashMap<String, Integer>();
+            while (doc_tokenizer.hasMoreTokens()) {
+                String token = doc_tokenizer.nextToken();
+                if (!token.isEmpty()) {
+                    // Manually update the count without using getOrDefault.
+                    if (wordCountMap.containsKey(token)) {
+                        wordCountMap.put(token, wordCountMap.get(token) + 1);
+                    } else {
+                        wordCountMap.put(token, 1);
+                    }
+                }
+            }
+            // Emit each word and its count in this line.
+            for (Map.Entry<String, Integer> entry : wordCountMap.entrySet()) {
+                wordText.set(entry.getKey());
+                context.write(wordText, new IntWritable(entry.getValue()));
+            }
 		}
 	}
 
@@ -71,12 +82,11 @@ public class CORPairs extends Configured implements Tool {
 		
 		@Override
 		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
-			int sum = 0;
-			for (IntWritable val : values) {
-				sum += val.get();
-			}
-			SUM.set(sum);
-			context.write(key, SUM);
+            int sum = 0;
+            for (IntWritable val : values) {
+                sum += val.get();
+            }
+            context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -85,32 +95,31 @@ public class CORPairs extends Configured implements Tool {
 	 * Second-pass Mapper
 	 */
 	public static class CORPairsMapper2 extends Mapper<LongWritable, Text, PairOfStrings, IntWritable> {
-		private static final IntWritable ONE = new IntWritable(1);
+		private final static IntWritable one = new IntWritable(1);
 		private static final PairOfStrings pair = new PairOfStrings();
     
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
-			String clean_doc = value.toString().replaceAll("[^a-z A-Z]", " ");
-			StringTokenizer doc_tokenizer = new StringTokenizer(clean_doc);
-			
-			// Collect unique words in the line
-			Set<String> uniqueWords = new TreeSet<String>();
-			while (doc_tokenizer.hasMoreTokens()) {
-				String token = doc_tokenizer.nextToken();
-				uniqueWords.add(token);
-			}
-			
-			// Generate all word pairs (ensuring alphabetical order)
-			List<String> wordList = new ArrayList<String>(uniqueWords);
-			for (int i = 0; i < wordList.size(); i++) {
-				String first_word = wordList.get(i);
-				for (int j = i + 1; j < wordList.size(); j++) {
-					String second_word = wordList.get(j);
-					pair.set(first_word, second_word);
-					context.write(pair, ONE);
-				}
-			}
+			String line = value.toString().replaceAll("[^a-zA-Z ]", " ");
+            StringTokenizer tokenizer = new StringTokenizer(line);
+            Set<String> uniqueWords = new HashSet<String>();
+            while (tokenizer.hasMoreTokens()) {
+                String token = tokenizer.nextToken();
+                if (!token.isEmpty()) {
+                    uniqueWords.add(token);
+                }
+            }
+            // Convert the set to a sorted list so that A is alphabetically smaller than B.
+            List<String> wordList = new ArrayList<String>(uniqueWords);
+            Collections.sort(wordList);
+            int n = wordList.size();
+            for (int i = 0; i < n; i++) {
+                for (int j = i + 1; j < n; j++) {
+                    // Create a pair with the first element lexicographically smaller.
+                    PairOfStrings pair = new PairOfStrings(wordList.get(i), wordList.get(j));
+                    context.write(pair, one);
+                }
+            }
 		}
 	}
 
@@ -123,11 +132,10 @@ public class CORPairs extends Configured implements Tool {
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
 			int sum = 0;
-			for (IntWritable val : values) {
-				sum += val.get();
-			}
-			SUM.set(sum);
-			context.write(key, SUM);
+            for (IntWritable val : values) {
+                sum += val.get();
+            }
+            context.write(key, new IntWritable(sum));
 		}
 	}
 
@@ -136,42 +144,37 @@ public class CORPairs extends Configured implements Tool {
 	 */
 	public static class CORPairsReducer2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, DoubleWritable> {
 		private final static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
-		private static final DoubleWritable correlation = new DoubleWritable();
 
 		/*
 		 * Preload the middle result file.
 		 * In the middle result file, each line contains a word and its frequency Freq(A), seperated by "\t"
 		 */
 		@Override
-		protected void setup(Context context) throws IOException, InterruptedException {
-			Path middle_result_path = new Path("mid/part-r-00000");
-			Configuration middle_conf = new Configuration();
-			try {
-				FileSystem fs = FileSystem.get(URI.create(middle_result_path.toString()), middle_conf);
-
-				if (!fs.exists(middle_result_path)) {
-					throw new IOException(middle_result_path.toString() + "not exist!");
-				}
-
-				FSDataInputStream in = fs.open(middle_result_path);
-				InputStreamReader inStream = new InputStreamReader(in);
-				BufferedReader reader = new BufferedReader(inStream);
-
-				LOG.info("reading...");
-				String line = reader.readLine();
-				String[] line_terms;
-				while (line != null) {
-					line_terms = line.split("\t");
-					word_total_map.put(line_terms[0], Integer.valueOf(line_terms[1]));
-					LOG.info("read one line!");
-					line = reader.readLine();
-				}
-				reader.close();
-				LOG.info("finished！");
-			} catch (Exception e) {
-				System.out.println(e.getMessage());
-			}
-		}
+        protected void setup(Context context) throws IOException, InterruptedException {
+            Path middle_result_path = new Path("mid/part-r-00000");
+            Configuration middle_conf = new Configuration();
+            try {
+                FileSystem fs = FileSystem.get(URI.create(middle_result_path.toString()), middle_conf);
+                if (!fs.exists(middle_result_path)) {
+                    throw new IOException(middle_result_path.toString() + " not exist!");
+                }
+                FSDataInputStream in = fs.open(middle_result_path);
+                BufferedReader reader = new BufferedReader(new InputStreamReader(in));
+                LOG.info("Reading middle result file...");
+                String line = reader.readLine();
+                while (line != null) {
+                    String[] parts = line.split("\t");
+                    if (parts.length == 2) {
+                        word_total_map.put(parts[0], Integer.valueOf(parts[1]));
+                    }
+                    line = reader.readLine();
+                }
+                reader.close();
+                LOG.info("Finished reading middle result file.");
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+            }
+        }
 
 		/*
 		 * Second-pass Reducer
@@ -179,32 +182,18 @@ public class CORPairs extends Configured implements Tool {
 		@Override
 		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
 			// Calculate Freq(A,B) - the number of lines containing both words
-			int pairFreq = 0;
-			for (IntWritable val : values) {
-				pairFreq += val.get();
-			}
-			
-			// Get the individual word frequencies
-			String wordA = key.getLeftElement();
-			String wordB = key.getRightElement();
-			
-			int freqA = 0;
-			int freqB = 0;
-			
-			if (word_total_map.containsKey(wordA)) {
-				freqA = word_total_map.get(wordA);
-			}
-			
-			if (word_total_map.containsKey(wordB)) {
-				freqB = word_total_map.get(wordB);
-			}
-			
-			if (freqA > 0 && freqB > 0) {
-				// Calculate correlation coefficient: COR(A,B) = Freq(A,B) / (Freq(A) * Freq(B))
-				double cor = (double) pairFreq / (freqA * freqB);
-				correlation.set(cor);
-				context.write(key, correlation);
-			}
+            int pairFreq = 0;
+            for (IntWritable val : values) {
+                pairFreq += val.get();
+            }
+            String wordA = key.getLeftElement();
+            String wordB = key.getRightElement();
+            Integer freqA = word_total_map.get(wordA);
+            Integer freqB = word_total_map.get(wordB);
+            if (freqA != null && freqB != null && freqA != 0 && freqB != 0) {
+                double cor = (double) pairFreq / (freqA * freqB);
+                context.write(key, new DoubleWritable(cor));
+            }
 		}
 	}
 
