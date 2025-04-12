@@ -1,0 +1,5 @@
+====BigramFrePairs==== Mark: 2/2
+====BigramFreStripes==== Mark: 0/2 [line 1: words <['the', '*', '27.0']> != <['the', '', '27.0']>]
+====CorPairs==== Mark: 3/3
+====CorStrip==== Mark: 3/3
+====Total Mark: 8/10
